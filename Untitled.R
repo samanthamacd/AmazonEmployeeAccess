@@ -1,31 +1,34 @@
-# Amazon Kaggle Comp 
+# SMOTE MODELS 
 
 library(tidyverse) 
 library(tidymodels)
 library(vroom)
 library(embed)
+library(themis)
 
 amazonTrain <- vroom("train.csv") 
 amazonTest <- vroom("test.csv")
-
-my_recipe <- recipe(ACTION~., data = amazonTrain) %>% 
-  step_mutate_at(all_numeric_predictors(), fn = factor) %>% 
-  step_other(all_nominal_predictors(), threshold = .001) %>% 
-  step_lencode_mixed(all_nominal_predictors(), outcome = vars('ACTION'))  
-
 amazonTrain$ACTION <- as.factor(amazonTrain$ACTION)
 
-prep <- prep(my_recipe) 
-baked <- bake(prep, new_data = amazonTrain)
+balanced_recipe <- recipe(ACTION~., data = amazonTrain) %>% 
+  step_mutate_at(all_numeric_predictors(), fn = factor) %>% 
+  step_other(all_nominal_predictors(), threshold = .001) %>%
+  step_lencode_mixed(all_nominal_predictors(), outcome = vars('ACTION')) %>% 
+  step_normalize(all_predictors()) %>%
+  step_pca(all_predictors(), threshold = .9) %>% 
+  step_smote(all_outcomes(), neighbors = 6)
+
+prep <- prep(balanced_recipe) 
+baked <- bake(prep, new_data = amazonTrain)  
 
 
-# 9 October - LogReg
+# LOGISTIC REGRESSION - not good very bad 
 
 log_reg_model <- logistic_reg() %>% 
   set_engine("glm") 
 
 amazon_wf <- workflow() %>% 
-  add_recipe(my_recipe) %>% 
+  add_recipe(balanced_recipe) %>% 
   add_model(log_reg_model) %>% 
   fit(data = amazonTrain) 
 
@@ -39,15 +42,15 @@ names(amazon_predictions)[1] <- "ACTION"
 new_predictions <- amazon_predictions %>% 
   select(c("id", "ACTION"))
 
-vroom_write(new_predictions, "AmazonPredictions.csv", delim=',')
+vroom_write(new_predictions, "SMOTE_LOGREG.csv", delim=',')
 
-# 11 October - Penalized LogReg 
+# PENALIZED REGRESSION - 0.7836 
 
 preg_mod <- logistic_reg(mixture = tune(), penalty = tune()) %>% 
   set_engine("glmnet") 
 
 preg_wf <- workflow() %>% 
-  add_recipe(my_recipe) %>% 
+  add_recipe(balanced_recipe) %>% 
   add_model(preg_mod) %>% 
   fit(data = amazonTrain) 
 
@@ -71,9 +74,9 @@ final_preds_preg <- final_preg_wf %>%
   rename(ACTION=.pred_1) %>%
   select(id, ACTION)
 
-vroom_write(final_preds_preg, "PregPredictions.csv", delim=',')
+vroom_write(final_preds_preg, "SMOTEPregPredictions.csv", delim=',')
 
-# 16 October - Classification Random Forests 
+# RANDOM FORESTS - .8414 slay!!!!
 
 my_mod <- rand_forest(mtry = tune(),
                       min_n = tune(),
@@ -82,11 +85,11 @@ my_mod <- rand_forest(mtry = tune(),
   set_mode("classification") 
 
 forest_wf <- workflow() %>% 
-  add_recipe(my_recipe) %>% 
+  add_recipe(balanced_recipe) %>% 
   add_model(my_mod) 
 
 tuning_grid_forest <- grid_regular(min_n(), 
-                            mtry(range=c(1,10))) 
+                                   mtry(range=c(1,10))) 
 
 folds <- vfold_cv(amazonTrain, v = 5, repeats=1)
 
@@ -111,33 +114,32 @@ final_preds_forest <- final_forest_wf %>%
   rename(ACTION=.pred_1) %>%
   select(id, ACTION)
 
-vroom_write(final_preds, "ForestPredictions.csv", delim=',')
+vroom_write(final_preds_forest, "SMOTEForestPredictions.csv", delim=',')
 
-
-# 18 October - naive bayes 
+# NAIVE BAYES - .78308 
 
 nb_model <- naive_Bayes(Laplace = tune(), smoothness = tune()) %>% 
   set_mode("classification") %>% 
   set_engine("naivebayes")
 
 nb_wf <- workflow() %>% 
-  add_recipe(my_recipe) %>% 
+  add_recipe(balanced_recipe) %>% 
   add_model(nb_model) 
 
 tuning_grid_bayes <- grid_regular(smoothness(), Laplace())  
 
 folds <- vfold_cv(amazonTrain, v = 5, repeats=1)
 
-CV_results <- nb_wf %>% 
+CV_results_nb <- nb_wf %>% 
   tune_grid(resamples = folds, 
             grid = tuning_grid_bayes, 
             metrics = metric_set(roc_auc))  
 
-bestTune <- CV_results %>% 
+bestTune_nb <- CV_results_nb %>% 
   select_best("roc_auc") 
 
 final_nb_wf <- nb_wf %>% 
-  finalize_workflow(bestTune) %>% 
+  finalize_workflow(bestTune_nb) %>% 
   fit(data=amazonTrain) 
 
 nb_preds <- final_nb_wf %>% 
@@ -149,17 +151,16 @@ final_preds_nb <- final_nb_wf %>%
   rename(ACTION=.pred_1) %>%
   select(id, ACTION)
 
-vroom_write(final_preds, "NBPredictions.csv", delim=',')
+vroom_write(final_preds_nb, "SMOTE_NBPredictions.csv", delim=',')
 
-
-# 20 October - K Nearest Neighbors 
+# KNN - .7979 
 
 knn_model <- nearest_neighbor(neighbors = tune()) %>% 
   set_mode("classification") %>% 
   set_engine("kknn") 
 
 knn_wf <- workflow() %>% 
-  add_recipe(my_recipe) %>% 
+  add_recipe(balanced_recipe) %>% 
   add_model(knn_model) 
 
 
@@ -188,6 +189,6 @@ final_preds_knn <- final_knn_wf %>%
   rename(ACTION=.pred_1) %>%
   select(id, ACTION)
 
-vroom_write(final_preds_knn, "KNNPredictions.csv", delim=',')
+vroom_write(final_preds_knn, "SMOTE_KNNPredictions.csv", delim=',')
 
 
