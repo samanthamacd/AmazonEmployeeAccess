@@ -17,7 +17,7 @@ balanced_recipe <- recipe(ACTION~., data = amazonTrain) %>%
   step_lencode_mixed(all_nominal_predictors(), outcome = vars('ACTION')) %>% 
   step_normalize(all_predictors()) %>%
   step_pca(all_predictors(), threshold = .9) %>% 
-  step_smote(all_outcomes(), neighbors = 9)
+  step_downsample(under_ratio = 1) 
 
 prep <- prep(balanced_recipe) 
 baked <- bake(prep, new_data = amazonTrain)  
@@ -57,4 +57,4 @@ final_preds_forest <- final_forest_wf %>%
   rename(ACTION=.pred_1) %>%
   select(id, ACTION)
 
-vroom_write(final_preds_forest, "FinalPredictions2.csv", delim=',')
+vroom_write(final_preds_forest, "FinalPredictions3.csv", delim=',')
